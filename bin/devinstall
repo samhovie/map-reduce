@@ -1,0 +1,22 @@
+#!/bin/sh
+
+if [ "$#" -lt 2 ]; then
+  echo "Usage: $(basename "$0") <path> <executable name(s)>"
+  exit 1
+fi
+
+if [ -z "$VIRTUAL_ENV" ]; then
+  echo "Error: Virtual environment must be running but was not found."
+  exit 1
+fi
+
+pip install -e "$1"
+
+shift
+
+BETTER_SHEBANG="$(head -n 4 "$VIRTUAL_ENV/bin/pip")"
+
+for arg in "$@"; do
+  NEW_CONTENT="$(printf '%s\n%s\n' "$BETTER_SHEBANG" "$(cat "$VIRTUAL_ENV/bin/$arg")")"
+  printf '%s' "$NEW_CONTENT" > "$VIRTUAL_ENV/bin/$arg"
+done

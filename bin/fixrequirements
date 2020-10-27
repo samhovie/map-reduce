@@ -1,0 +1,22 @@
+#!/bin/sh
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $(basename "$0") <path of env>"
+  exit 1
+fi
+
+for file in "$1"/bin/*; do
+  CURR_BEGIN="$(head -n 1 "$file")"
+  case $CURR_BEGIN in "#!\""*)
+    INTERP_PATH="$(printf "%s" "$CURR_BEGIN" | sed 's/\(^#!"\)//;s/\("$\)//')"
+    BETTER_SHEBANG="$(cat << EOF
+#!/bin/sh
+'''exec' "$INTERP_PATH" "\$0" "\$@"
+' '''
+# -*- coding: utf-8 -*-
+EOF
+    )"
+    NEW_CONTENT="$(printf '%s\n%s\n' "$BETTER_SHEBANG" "$(cat "$file")")"
+    printf '%s' "$NEW_CONTENT" > "$file"
+  esac
+done
