@@ -1,0 +1,96 @@
+#!/bin/bash
+#
+# mapreduce (start|status|restart|stop)
+
+# Stop on errors
+# See https://vaneyckt.io/posts/safer_bash_scripts_with_set_euxo_pipefail/
+set -Eeuo pipefail
+
+PGREP="pgrep -af"
+if [ "$(uname -s)" = 'Darwin' ]; then
+  PGREP="pgrep -lf"
+fi
+
+usage() {
+  >&2 echo "Usage: $0 (start|status|restart|stop)"
+}
+
+run_start() {
+  if $PGREP mapreduce-master &>/dev/null; then
+    >&2 echo 'Error: mapreduce-master is already running'
+    exit 1
+  fi
+  if $PGREP mapreduce-worker &>/dev/null; then
+    >&2 echo 'Error: mapreduce-worker is already running'
+    exit 1
+  fi
+  mapreduce-master 6000 &
+  sleep 2
+  mapreduce-worker 6000 6001 &
+  mapreduce-worker 6000 6002 &
+}
+
+run_status() {
+  if $PGREP mapreduce-master &>/dev/null; then
+    echo 'master running'
+  else
+    echo 'master not running'
+  fi
+
+  if $PGREP mapreduce-worker &>/dev/null; then
+    echo 'workers running'
+  else
+    echo 'workers not running'
+  fi
+}
+
+run_stop() {
+  # Detect GNU vs BSD netcat.  We need netcat to close the connection after
+  # sending a message, which requires different options.
+  set +o pipefail  # Avoid erroneous failures due to grep returning non-zero
+  if nc -h 2>&1 | grep -q "\-c"; then
+    NC="nc -c"
+  elif nc -h 2>&1 | grep -q "\-N"; then
+    NC="nc -N"
+  elif nc -h 2>&1 | grep -q "\-C"; then
+    NC="nc -C"
+  else
+    echo "Error detecting netcat version."
+    exit 1
+  fi
+  set -o pipefail
+
+  echo '{"message_type": "shutdown"}' | $NC localhost 6000 || true
+  sleep 2  # give the master time to receive signal and send to workers
+
+  echo 'killing mapreduce master ...'
+  pkill -f mapreduce-master || true
+
+  echo 'killing mapreduce worker ...'
+  pkill -f mapreduce-worker || true
+}
+
+if [ $# -ne 1 ]; then
+  usage
+  exit 1
+fi
+
+case $1 in
+  "start")
+    run_start
+    ;;
+  "status")
+    run_status
+    ;;
+  "restart")
+    run_stop
+    run_start
+    ;;
+  "stop")
+    run_stop
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
