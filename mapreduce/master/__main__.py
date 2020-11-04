@@ -1,17 +1,18 @@
 import os
 import logging
 import json
+import socket
 import time
 import click
+from mapreduce.master.job import Job
 import mapreduce.utils
 from pathlib import Path 
+from queue import Queue
 import shutil
-import threading
 
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
-
 
 class Master:
     # Whether or not shutdown message has been received
@@ -26,6 +27,8 @@ class Master:
         #   last_hb_received:
         # },
     }
+    # Job and job queue
+    job_queue = Queue()
 
     def __init__(self, port):
         logging.info("Starting master:%s", port)
@@ -86,14 +89,7 @@ class Master:
             # Parse message chunks into JSON data
             message_bytes = b''.join(message_chunks)
             message_str = message_bytes.decode("utf-8")
-            try:
-                msg = json.loads(message_str)
-            except JSONDecodeError:
-                continue
-
-            # Handle message depending on type
-            if msg["message_type"] == "shutdown":
-                self.shutdown = True
+        listen(port)
 
 
     def heartbeat():
@@ -144,6 +140,49 @@ class Master:
             # Handle message depending on type
             if msg["message_type"] == "heartbeat" and msg["worker_pid"] in workers:
                 workers[msg["worker_pid"]]["last_hb_received"] = time.time()
+
+    def start_job(msg):
+        if not utils.check_schema({
+            "input_directory": str,
+            "output_directory": str,
+            "mapper_executable": str,
+            "reducer_executable": str,
+            "num_mappers": int,
+            "num_reducers": int,
+        }, msg):
+            return False
+
+        input_dir = msg["input_directory"]
+        output_dir = msg["output_directory"]
+        mapper_exec = msg["mapper_executable"]
+        reducer_exec = msg["reducer_executable"]
+        num_mappers = msg["num_mappers"]
+        num_reducers = msg["num_reducers"]
+
+        new_job = Job(
+            input_dir,
+            output_dir,
+            mapper_exec,
+            reducer_exec,
+            num_mappers,
+            num_reducers
+        )
+
+        if len(ready_workers) == 0 or Job.current() is not None:
+            job_queue.put(job)
+        else:
+            job.start()
+
+        return True
+
+    def round_robin_workers(tasks, executor):
+        with worker_status_lock:
+            while len(ready_workers) == 0:
+                if not worker_ready.wait(timeout=1.0):
+                    if shutdown:
+                        return False
+            return utils.round_robin(tasks, ready_workers)
+
 
 @click.command()
 @click.argument("port", nargs=1, type=int)
