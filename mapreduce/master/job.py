@@ -1,4 +1,6 @@
 import logging
+import mapreduce.utils
+from pathlib import Path
 
 
 class Job:
@@ -25,7 +27,7 @@ class Job:
         self._num_mappers = num_mappers
         self._num_reducers = num_reducers
 
-        self._id = Job._next_job_id
+        self._id = Job._next_id
         Job._next_id += 1
 
         logging.info(f"Master: Received job {self._id}: {input_dir} "
@@ -33,7 +35,8 @@ class Job:
                      f"{num_mappers} {num_reducers}"
                     )
 
-        self._folder = Path("tmp")/f"job-{job_id}"
+        print("Creating dirs")
+        self._folder = Path("tmp")/f"job-{self._id}"
 
         self._folder.mkdir()
         (self._folder/"mapper-output").mkdir()

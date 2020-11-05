@@ -190,7 +190,7 @@ class Master:
                 self.workers[msg["worker_pid"]]["last_hb_received"] = time.time()
 
     def start_job(self, msg):
-        if not utils.check_schema({
+        if not mapreduce.utils.check_schema({
             "input_directory": str,
             "output_directory": str,
             "mapper_executable": str,
@@ -220,9 +220,9 @@ class Master:
         ready_workers = [worker for worker in self.workers if worker["status"] == "ready"]
 
         if len(ready_workers) == 0 or Job.current() is not None:
-            job_queue.put(job)
+            self.job_queue.put(new_job)
         else:
-            job.start()
+            new_job.start()
 
 
     def round_robin_workers(self, tasks, executor):
@@ -231,7 +231,7 @@ class Master:
             if not worker_ready.wait(timeout=1.0):
                 if shutdown:
                     return False
-        return utils.round_robin(tasks, ready_workers)
+        return mapreduce.utils.round_robin(tasks, ready_workers)
 
 
 @click.command()
