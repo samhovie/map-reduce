@@ -5,6 +5,7 @@ import time
 import click
 import mapreduce.utils
 import threading
+import socket
 
 
 # Configure logging
@@ -16,8 +17,8 @@ class Worker:
     shutdown = False 
 
     def __init__(self, master_port, worker_port):
-        logging.info("Starting worker:%s", worker_port)
-        logging.info("Worker:%s PWD %s", worker_port, os.getcwd())
+        logging.debug("Starting worker:%s", worker_port)
+        logging.debug("Worker:%s PWD %s", worker_port, os.getcwd())
 
         # Set port class variables
         self.port = worker_port
@@ -28,7 +29,8 @@ class Worker:
         listen_thread.start()
 
         # Initiate hb before registering - storing Timer in case we need to cancel is on shutdown
-        self.heartbeat = threading.Timer(2, send_heartbeat)
+        self.heartbeat = threading.Timer(2, self.send_heartbeat)
+        self.heartbeat.start()
 
         # Connect to the server
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -44,8 +46,11 @@ class Worker:
         sock.sendall(message.encode('utf-8'))
         sock.close()
 
+        listen_thread.join()
+        self.heartbeat.cancel()
 
-    def listen():
+
+    def listen(self):
         """Wait on a message from a socket OR a shutdown signal."""
 
         # Create socket
@@ -83,18 +88,24 @@ class Worker:
             message_str = message_bytes.decode("utf-8")
             try:
                 msg = json.loads(message_str)
-            except JSONDecodeError:
+            except json.JSONDecodeError:
+                continue
+
+            if "message_type" not in msg:
                 continue
 
             # Handle message depending on type
-            if msg["message_type"] == "shutdown":            
+            if msg["message_type"] == "shutdown":
+                logging.debug("Worker: Shutting down")
                 self.shutdown = True
 
-            elif message_dict["message_type"] == "register_ack":
-                # Do something
+            elif msg["message_type"] == "register_ack":
+                # TODO: Do something
+                pass
 
-    def send_heartbeat()
+    def send_heartbeat(self):
         # Open connection to master port - 1
+        
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.connect(("localhost", self.master_port - 1))
 

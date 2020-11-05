@@ -9,6 +9,7 @@ import mapreduce.utils
 from pathlib import Path 
 from queue import Queue
 import shutil
+import threading
 
 
 # Configure logging
@@ -27,12 +28,13 @@ class Master:
         #   last_hb_received:
         # },
     }
+
     # Job and job queue
     job_queue = Queue()
 
     def __init__(self, port):
-        logging.info("Starting master:%s", port)
-        logging.info("Master:%s PWD %s", port, os.getcwd())
+        logging.debug("Starting master:%s", port)
+        logging.debug("Master:%s PWD %s", port, os.getcwd())
 
         # Initialize port class variable
         self.port = port
@@ -51,8 +53,11 @@ class Master:
         listen_thread = threading.Thread(target=self.listen)
         listen_thread.start()
 
+        hb_thread.join()
+        listen_thread.join()
 
-    def listen():
+
+    def listen(self):
         """Wait on a message from a socket OR a shutdown signal."""
 
         # Create socket
@@ -72,7 +77,6 @@ class Master:
                 clientsocket, address = sock.accept()
             except socket.timeout:
                 continue
-            print("Connection from", address[0])
 
             # Receive data chunks
             message_chunks = []
@@ -89,10 +93,53 @@ class Master:
             # Parse message chunks into JSON data
             message_bytes = b''.join(message_chunks)
             message_str = message_bytes.decode("utf-8")
-        listen(port)
+            try:
+                msg = json.loads(message_str)
+            except json.JSONDecodeError:
+                continue
+
+            if "message_type" not in msg:
+                continue
+            
+            # Handle message depending on type
+            if msg["message_type"] == "shutdown":            
+                self.shutdown = True
+                logging.debug("Master: Shutting down")
+                for worker in self.workers.values():
+                    if worker["status"] != "dead":
+                        self.send_shutdown(worker["port"])
+            elif msg["message_type"] == "register":
+                # Register worker
+                logging.debug(f"Registering worker with PID {msg['worker_pid']}")
+                self.workers[msg["worker_pid"]] = {
+                    "host" : msg["worker_host"],
+                    "port": msg["worker_port"],
+                    "status": "ready",
+                    "last_hb_received": time.time(), 
+                }
+                self.send_register_ack(msg["worker_pid"])
+                
+            elif msg["message_type"] == "new_master_job":
+                self.start_job(msg)
+
+    def send_shutdown(self, worker_port):
+        message = {
+            "message_type" : "shutdown",
+        }
+        mapreduce.utils.send_message(message, "localhost", worker_port)
 
 
-    def heartbeat():
+    def send_register_ack(self, worker_pid):
+        worker = self.workers[worker_pid]
+        message = {
+            "message_type" : "register_ack",
+            "worker_host" : worker["host"],
+            "worker_port" : worker["port"],
+            "worker_pid" : worker_pid,
+        }
+        mapreduce.utils.send_message(message, "localhost", worker["port"])
+
+    def heartbeat(self):
         """Manage heartbeats for registered workers."""
 
         # Create socket on master port - 1
@@ -106,9 +153,10 @@ class Master:
 
         while not self.shutdown:
             # Check if any workers are dead
-            for pid, worker_info in workers:
+            for worker_info in self.workers.values():
                 if time.time() - worker_info["last_hb_received"] > 10:
                     worker_info["status"] = "dead"
+                    pass
 
             # Listen for a connection for 1s.
             try:
@@ -134,14 +182,14 @@ class Master:
             message_str = message_bytes.decode("utf-8")
             try:
                 msg = json.loads(message_str)
-            except JSONDecodeError:
+            except json.JSONDecodeError:
                 continue
 
             # Handle message depending on type
-            if msg["message_type"] == "heartbeat" and msg["worker_pid"] in workers:
-                workers[msg["worker_pid"]]["last_hb_received"] = time.time()
+            if msg["message_type"] == "heartbeat" and msg["worker_pid"] in self.workers:
+                self.workers[msg["worker_pid"]]["last_hb_received"] = time.time()
 
-    def start_job(msg):
+    def start_job(self, msg):
         if not utils.check_schema({
             "input_directory": str,
             "output_directory": str,
@@ -150,7 +198,8 @@ class Master:
             "num_mappers": int,
             "num_reducers": int,
         }, msg):
-            return False
+            logging.debug("Master: Invalid job request")
+            return
 
         input_dir = msg["input_directory"]
         output_dir = msg["output_directory"]
@@ -168,20 +217,21 @@ class Master:
             num_reducers
         )
 
+        ready_workers = [worker for worker in self.workers if worker["status"] == "ready"]
+
         if len(ready_workers) == 0 or Job.current() is not None:
             job_queue.put(job)
         else:
             job.start()
 
-        return True
 
-    def round_robin_workers(tasks, executor):
-        with worker_status_lock:
-            while len(ready_workers) == 0:
-                if not worker_ready.wait(timeout=1.0):
-                    if shutdown:
-                        return False
-            return utils.round_robin(tasks, ready_workers)
+    def round_robin_workers(self, tasks, executor):
+        # TODO: This is not correct
+        while len(ready_workers) == 0:
+            if not worker_ready.wait(timeout=1.0):
+                if shutdown:
+                    return False
+        return utils.round_robin(tasks, ready_workers)
 
 
 @click.command()

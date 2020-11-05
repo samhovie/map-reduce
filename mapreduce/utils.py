@@ -4,6 +4,20 @@ This file is to house code common between the Master and the Worker
 
 """
 
+import json
+import socket
+
+
+def send_message(msg, host, port):
+    """Sends msg over TCP to host:port."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((host, port))
+
+    message = json.dumps(msg)
+    sock.sendall(message.encode('utf-8'))
+    sock.close()
+
+
 def check_schema(schema, value):
     if isinstance(schema, dict):
         if not isinstance(value, dict):
