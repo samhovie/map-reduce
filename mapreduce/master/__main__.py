@@ -221,7 +221,7 @@ class Master:
             self.workers,
         )
 
-        ready_workers = [worker for worker in self.workers if worker["status"] == "ready"]
+        ready_workers = [worker for worker in self.workers.values() if worker["status"] == "ready"]
 
         if len(ready_workers) == 0 or self.current_job is not None:
             self.job_queue.put(new_job)

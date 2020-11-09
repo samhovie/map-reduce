@@ -43,12 +43,26 @@ class Job:
     def start(self):
         logging.info(f"Master: Starting job {self._id}")
 
-        self.status = "started"
+        self._status = "started"
         self.mapping()
 
     def mapping(self):
-        # TODO: Partition input files for this stage
         logging.info(f"Master: Starting mapping stage for job {self._id}")
+        partition = self.partition_input()
+
+        # ready_workers = [worker for worker in self._workers.values() if worker["status"] == "ready"]
+        """
+        TODO:
+         - Assign as many tasks as we can to available workers
+         - If not enough workers are available, "wait" (how?)
+         - If there are too many workers, don't assign all of them (we don't need them all)
+        """
+
+        for task in partition:
+            # Assign task to a worker if one is available
+            for worker in self._workers.values():
+                # if worker is ready, assign task and break
+
 
     def grouping(self):
         # TODO
