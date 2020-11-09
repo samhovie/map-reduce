@@ -16,28 +16,30 @@ import threading
 logging.basicConfig(level=logging.DEBUG)
 
 class Master:
-    # Whether or not shutdown message has been received
-    shutdown = False
-    # Dictionary of registered workers, key is pid and value is dict of worker info
-    # TODO: make this an ordered dict
-    workers = {
-        # [pid]: {
-        #   host: 
-        #   port:
-        #   status:
-        #   last_hb_received:
-        # },
-    }
-
-    # Job and job queue
-    job_queue = Queue()
-
     def __init__(self, port):
         logging.debug("Starting master:%s", port)
         logging.debug("Master:%s PWD %s", port, os.getcwd())
 
         # Initialize port class variable
         self.port = port
+        
+        # Whether or not shutdown message has been received
+        self.shutdown = False
+        
+        # Dictionary of registered workers, key is pid and value is dict of worker info
+        # TODO: make this an ordered dict
+        self.workers = {
+            # [pid]: {
+            #   host: 
+            #   port:
+            #   status:
+            #   last_hb_received:
+            # },
+        }
+
+        # Job queue and current job
+        self.job_queue = Queue()
+        self.current_job = None
 
         # Create clean folder to store server results 
         p = Path('tmp')
@@ -118,6 +120,7 @@ class Master:
                     "last_hb_received": time.time(), 
                 }
                 self.send_register_ack(msg["worker_pid"])
+                # TODO: Check the job queue here
                 
             elif msg["message_type"] == "new_master_job":
                 self.start_job(msg)
@@ -219,9 +222,10 @@ class Master:
 
         ready_workers = [worker for worker in self.workers if worker["status"] == "ready"]
 
-        if len(ready_workers) == 0 or Job.current() is not None:
+        if len(ready_workers) == 0 or self.current_job is not None:
             self.job_queue.put(new_job)
         else:
+            self.current_job = new_job
             new_job.start()
 
 

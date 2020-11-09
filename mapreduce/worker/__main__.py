@@ -13,16 +13,14 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class Worker:
-    # Tracks whether or not to shutdown
-    shutdown = False 
-
     def __init__(self, master_port, worker_port):
         logging.debug("Starting worker:%s", worker_port)
         logging.debug("Worker:%s PWD %s", worker_port, os.getcwd())
 
-        # Set port class variables
+        # Set class variables
         self.port = worker_port
         self.master_port = master_port
+        self.shutdown = False 
 
         # Listen for messages on worker's port
         listen_thread = threading.Thread(target=self.listen)

@@ -5,11 +5,6 @@ from pathlib import Path
 
 class Job:
     _next_id = 0
-    _current = None
-
-    def current():
-        return Job._current
-
 
     def __init__(
             self,
@@ -35,7 +30,6 @@ class Job:
                      f"{num_mappers} {num_reducers}"
                     )
 
-        print("Creating dirs")
         self._folder = Path("tmp")/f"job-{self._id}"
 
         self._folder.mkdir()
@@ -45,9 +39,6 @@ class Job:
 
     def start(self):
         logging.info(f"Master: Starting job {self._id}")
-
-        assert(Job._current is None)
-        Job._current = self
 
         self.status = "started"
         self.mapping()
@@ -68,7 +59,6 @@ class Job:
         # TODO
         logging.info(f"Master: Finishing job {self._id}")
         self.status = "finished"
-        Job._current = None
 
     def status_update(self, worker_status):
         # TODO
