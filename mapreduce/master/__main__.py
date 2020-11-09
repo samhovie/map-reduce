@@ -217,7 +217,8 @@ class Master:
             mapper_exec,
             reducer_exec,
             num_mappers,
-            num_reducers
+            num_reducers,
+            self.workers,
         )
 
         ready_workers = [worker for worker in self.workers if worker["status"] == "ready"]
@@ -227,15 +228,6 @@ class Master:
         else:
             self.current_job = new_job
             new_job.start()
-
-
-    def round_robin_workers(self, tasks, executor):
-        # TODO: This is not correct
-        while len(ready_workers) == 0:
-            if not worker_ready.wait(timeout=1.0):
-                if shutdown:
-                    return False
-        return mapreduce.utils.round_robin(tasks, ready_workers)
 
 
 @click.command()
