@@ -69,8 +69,8 @@ class Job:
         job_list = [(job, None, False) for job in partition]
         job_outputs = []
 
+        logging.info("Assigning workers for mapping")
         while len([job for job, pid, completed in job_list if not completed]) != 0:
-            logging.info("Assigning workers for mapping")
             if self._signals["shutdown"]:
                 logging.info("Shutting down in mapping stage.")
                 return False
@@ -82,10 +82,12 @@ class Job:
                     job_list[i] = (job, worker_pid, True)
                     assert(self._workers[worker_pid]["job_output"] is not None)
                     job_outputs.append(self._workers[worker_pid]["job_output"])
+                    logging.info(f"Mapping job {i} complete")
                 elif worker_pid is None:
                     for worker in self._workers.values():
                         if worker["status"] == "ready":
                             worker["status"] = "busy"
+                            job_list[i] = (job, worker["pid"], False)
                             mapreduce.utils.send_message({
                                 "message_type": "new_worker_job",
                                 "input_files": [str(file) for file in job],

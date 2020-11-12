@@ -61,6 +61,7 @@ class Master:
         """Wait on a message from a socket OR a shutdown signal."""
 
         # Create socket
+        logging.info(f"Listening for a connection on localhost:{self.port}")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("localhost", self.port))
@@ -71,7 +72,6 @@ class Master:
 
         # Accept connections for messages until shutdown message
         while not self.signals["shutdown"]:
-            logging.info(f"Listening for a connection on localhost:{self.port}")
             # Listen for a connection for 1s.
             try:
                 clientsocket, address = sock.accept()
@@ -89,7 +89,6 @@ class Master:
                     break
                 message_chunks.append(data)
             clientsocket.close()
-            logging.info("Received a message")
 
             # Parse message chunks into JSON data
             message_bytes = b''.join(message_chunks)
@@ -97,13 +96,15 @@ class Master:
             try:
                 msg = json.loads(message_str)
             except json.JSONDecodeError:
+                logging.debug("Master: JSON decoding failed for a message")
                 continue
 
             if "message_type" not in msg:
+                logging.debug("Master: Invalid message")
                 continue
             
             # Handle message depending on type
-            if msg["message_type"] == "shutdown":            
+            if msg["message_type"] == "shutdown":
                 self.signals["shutdown"] = True
                 logging.debug("Master: Shutting down")
                 for worker in self.workers.values():
@@ -113,7 +114,8 @@ class Master:
                 # Register worker
                 logging.debug(f"Registering worker with PID {msg['worker_pid']}")
                 self.workers[msg["worker_pid"]] = {
-                    "host" : msg["worker_host"],
+                    "pid": msg["worker_pid"],
+                    "host": msg["worker_host"],
                     "port": msg["worker_port"],
                     "status": "ready",
                     "last_hb_received": time.time(),
@@ -126,9 +128,13 @@ class Master:
 
             elif msg["message_type"] == "status":
                 worker_pid = msg["worker_pid"]
+                logging.info(f"Master: Status update for worker {worker_pid}")
+                logging.debug(msg)
                 self.workers[worker_pid]["status"] = "ready"
                 # TODO: Handle finished messages for Grouping stage
                 self.workers[worker_pid]["job_output"] = msg["output_files"]
+
+        sock.close()
 
     def send_shutdown(self, worker_port):
         message = {
@@ -151,10 +157,10 @@ class Master:
         """Manage heartbeats for registered workers."""
 
         # Create socket on master port - 1
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        logging.info(f"Listening for heartbeats on localhost:{self.port-1}")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("localhost", self.port - 1))
-        sock.listen()
 
         # Socket accept() and recv() will block for a maximum of 1 second
         sock.settimeout(1)
@@ -164,38 +170,30 @@ class Master:
             for worker_info in self.workers.values():
                 if time.time() - worker_info["last_hb_received"] > 10:
                     worker_info["status"] = "dead"
-                    pass
 
-            # Listen for a connection for 1s.
+            # Receive data
             try:
-                clientsocket, address = sock.accept()
+                sock.settimeout(1)
+                message_bytes = sock.recv(4096)
             except socket.timeout:
                 continue
-            logging.info("Heartbeat from %s", address[0])
-
-            # Receive data chunks
-            message_chunks = []
-            while True:
-                try:
-                    data = clientsocket.recv(4096)
-                except socket.timeout:
-                    continue
-                if not data:
-                    break
-                message_chunks.append(data)
-            clientsocket.close()
+            if not data:
+                continue
 
             # Parse message chunks into JSON data
-            message_bytes = b''.join(message_chunks)
             message_str = message_bytes.decode("utf-8")
             try:
                 msg = json.loads(message_str)
             except json.JSONDecodeError:
                 continue
 
+            logging.info("Heartbeat from %s", address[0])
+
             # Handle message depending on type
             if msg["message_type"] == "heartbeat" and msg["worker_pid"] in self.workers:
                 self.workers[msg["worker_pid"]]["last_hb_received"] = time.time()
+
+        sock.close()
 
     def init_job(self, msg):
         if not mapreduce.utils.check_schema({
@@ -233,9 +231,7 @@ class Master:
     def manage_jobs(self):
         while not self.signals["shutdown"]:
             try:
-                logging.info(f"Master: Retrieving job from queue")
                 current_job = self.job_queue.get(timeout=1)
-                logging.info(f"Master: Retrieved job from queue")
             except Empty:
                 continue
 

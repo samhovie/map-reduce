@@ -5,6 +5,7 @@ import time
 import click
 import mapreduce.utils
 from pathlib import Path
+import subprocess
 import threading
 import socket
 
@@ -27,8 +28,8 @@ class Worker:
         listen_thread = threading.Thread(target=self.listen)
         listen_thread.start()
 
-        # Initiate hb before registering - storing Timer in case we need to cancel is on shutdown
-        self.heartbeat = threading.Timer(2, self.send_heartbeat)
+        # Initiate hb before registering
+        self.heartbeat = threading.Thread(target=self.heartbeats_timer)
 
         # Connect to the server
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -45,7 +46,8 @@ class Worker:
         sock.close()
 
         listen_thread.join()
-        self.heartbeat.cancel()
+        if self.heartbeat.is_alive():
+            self.heartbeat.join()
 
 
     def listen(self):
@@ -107,6 +109,11 @@ class Worker:
                     Path(msg["output_directory"])
                 )
 
+    def heartbeats_timer(self):
+        while not self.shutdown:
+            self.send_heartbeat()
+            time.sleep(2)
+
     def send_heartbeat(self):
         # Open connection to master port - 1
         
@@ -121,6 +128,7 @@ class Worker:
         sock.close()
 
     def run_executable(self, exec, input_files, output_dir):
+        logging.info("Worker: Running executable: %s", exec)
         output_files = []
         for file in input_files:
             output_file = output_dir/file.name
