@@ -124,8 +124,7 @@ class Worker:
         output_files = []
         for file in input_files:
             output_file = output_dir/file.name
-            with input_file_opened as file.open("r"),
-                output_file_opened as output_file.open("w"):
+            with file.open("r") as input_file_opened, output_file.open("w") as output_file_opened:
                 subprocess.run(str(exec), stdin=input_file_opened, stdout=output_file_opened)
             output_files.append(output_file)
 

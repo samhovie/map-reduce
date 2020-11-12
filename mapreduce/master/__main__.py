@@ -70,8 +70,8 @@ class Master:
         sock.settimeout(1)
 
         # Accept connections for messages until shutdown message
-        
         while not self.signals["shutdown"]:
+            logging.info(f"Listening for a connection on localhost:{self.port}")
             # Listen for a connection for 1s.
             try:
                 clientsocket, address = sock.accept()
@@ -89,6 +89,7 @@ class Master:
                     break
                 message_chunks.append(data)
             clientsocket.close()
+            logging.info("Received a message")
 
             # Parse message chunks into JSON data
             message_bytes = b''.join(message_chunks)
@@ -170,7 +171,7 @@ class Master:
                 clientsocket, address = sock.accept()
             except socket.timeout:
                 continue
-            print("Connection from", address[0])
+            logging.info("Heartbeat from %s", address[0])
 
             # Receive data chunks
             message_chunks = []
@@ -226,12 +227,15 @@ class Master:
             self.signals,
         )
 
+        logging.info(f"Master: Adding job to queue")
         self.job_queue.put(new_job)
 
     def manage_jobs(self):
         while not self.signals["shutdown"]:
             try:
+                logging.info(f"Master: Retrieving job from queue")
                 current_job = self.job_queue.get(timeout=1)
+                logging.info(f"Master: Retrieved job from queue")
             except Empty:
                 continue
 

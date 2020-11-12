@@ -1,6 +1,7 @@
 import logging
 import mapreduce.utils
 from pathlib import Path
+import time
 
 
 class Job:
@@ -37,11 +38,11 @@ class Job:
         self._folder = Path("tmp")/f"job-{self._id}"
         self._folder.mkdir()
 
-        self._mapper_output_dir = self._folder/"mapper_output"
+        self._mapper_output_dir = self._folder/"mapper-output"
         self._mapper_output_dir.mkdir()
-        self._grouper_output_dir = self._folder/"grouper_output"
+        self._grouper_output_dir = self._folder/"grouper-output"
         self._grouper_output_dir.mkdir()
-        self._reducer_output_dir = self._folder/"reducer_output"
+        self._reducer_output_dir = self._folder/"reducer-output"
         self._reducer_output_dir.mkdir()
 
 
@@ -69,6 +70,7 @@ class Job:
         job_outputs = []
 
         while len([job for job, pid, completed in job_list if not completed]) != 0:
+            logging.info("Assigning workers for mapping")
             if self._signals["shutdown"]:
                 logging.info("Shutting down in mapping stage.")
                 return False
@@ -122,7 +124,7 @@ class Job:
         i = 0
         for file in files:
             partition[i].append(file)
-            i = (i + 1) % len(files)
+            i = (i + 1) % self._num_mappers
         
         return partition
 
