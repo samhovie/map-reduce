@@ -4,6 +4,7 @@ import json
 import time
 import click
 import mapreduce.utils
+from pathlib import Path
 import threading
 import socket
 
@@ -28,7 +29,6 @@ class Worker:
 
         # Initiate hb before registering - storing Timer in case we need to cancel is on shutdown
         self.heartbeat = threading.Timer(2, self.send_heartbeat)
-        self.heartbeat.start()
 
         # Connect to the server
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -98,8 +98,14 @@ class Worker:
                 self.shutdown = True
 
             elif msg["message_type"] == "register_ack":
-                # TODO: Do something
-                pass
+                self.heartbeat.start()
+
+            elif msg["message_type"] == "new_worker_job":
+                self.run_executable(
+                    msg["executable"],
+                    [Path(file) for file in msg["input_files"]],
+                    Path(msg["output_directory"])
+                )
 
     def send_heartbeat(self):
         # Open connection to master port - 1
@@ -113,6 +119,23 @@ class Worker:
         })
         sock.sendall(message.encode('utf-8'))
         sock.close()
+
+    def run_executable(self, exec, input_files, output_dir):
+        output_files = []
+        for file in input_files:
+            output_file = output_dir/file.name
+            with input_file_opened as file.open("r"),
+                output_file_opened as output_file.open("w"):
+                subprocess.run(str(exec), stdin=input_file_opened, stdout=output_file_opened)
+            output_files.append(output_file)
+
+        mapreduce.utils.send_message({
+            "message_type": "status",
+            "output_files": [str(file) for file in output_files],
+            "status": "finished",
+            "worker_pid": os.getpid(),
+        }, "localhost", self.master_port)
+        
 
 @click.command()
 @click.argument("master_port", nargs=1, type=int)
