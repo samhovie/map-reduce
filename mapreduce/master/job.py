@@ -35,11 +35,14 @@ class Job:
                     )
 
         self._folder = Path("tmp")/f"job-{self._id}"
-
         self._folder.mkdir()
-        (self._folder/"mapper-output").mkdir()
-        (self._folder/"grouper-output").mkdir()
-        (self._folder/"reducer-output").mkdir()
+
+        self._mapper_output_dir = self._folder/"mapper_output"
+        self._mapper_output_dir.mkdir()
+        self._grouper_output_dir = self._folder/"grouper_output"
+        self._grouper_output_dir.mkdir()
+        self._reducer_output_dir = self._folder/"reducer_output"
+        self._reducer_output_dir.mkdir()
 
 
     def start(self):
@@ -63,9 +66,9 @@ class Job:
         # Each job is a tuple containing the list of input files, the PID of the worker
         # assigned to the job, and whether the job is finished.
         job_list = [(job, None, False) for job in partition]
+        job_outputs = []
 
         while len([job for job, pid, completed in job_list if not completed]) != 0:
-            # TODO: How do we get `shutdown` from master?
             if self._signals["shutdown"]:
                 logging.info("Shutting down in mapping stage.")
                 return False
@@ -74,7 +77,9 @@ class Job:
                     continue
                 elif worker_pid is not None and self._workers[worker_pid]["status"] == "ready":
                     # The worker has completed this job.
-                    job_list[i] = (job, self._workers[worker_pid], True)
+                    job_list[i] = (job, worker_pid, True)
+                    assert(self._workers[worker_pid]["job_output"] is not None)
+                    job_outputs.append(self._workers[worker_pid]["job_output"])
                 elif worker_pid is None:
                     for worker in self._workers.values():
                         if worker["status"] == "ready":
@@ -83,7 +88,7 @@ class Job:
                                 "message_type": "new_worker_job",
                                 "input_files": [str(file) for file in job],
                                 "executable": self._mapper_exec,
-                                "output_directory": str(self._output_dir),
+                                "output_directory": str(self._mapper_output_dir),
                                 "worker_pid": worker_pid,
                             }, worker["host"], worker["port"])
                             break
