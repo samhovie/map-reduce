@@ -7,7 +7,8 @@ import click
 from mapreduce.master.job import Job
 import mapreduce.utils
 from pathlib import Path 
-from queue import Queue
+from collections import OrderedDict
+from queue import Empty, Queue
 import shutil
 import threading
 
@@ -24,22 +25,13 @@ class Master:
         self.port = port
         
         # Whether or not shutdown message has been received
-        self.shutdown = False
+        self.signals = {"shutdown": False}
         
         # Dictionary of registered workers, key is pid and value is dict of worker info
-        # TODO: make this an ordered dict
-        self.workers = {
-            # [pid]: {
-            #   host: 
-            #   port:
-            #   status:
-            #   last_hb_received:
-            # },
-        }
+        self.workers = OrderedDict()
 
         # Job queue and current job
         self.job_queue = Queue()
-        self.current_job = None
 
         # Create clean folder to store server results 
         p = Path('tmp')
@@ -55,8 +47,14 @@ class Master:
         listen_thread = threading.Thread(target=self.listen)
         listen_thread.start()
 
+        # Start job when we receive one
+        manage_jobs_thread = threading.Thread(target=self.manage_jobs)
+        manage_jobs_thread.start()
+
+        # Wait for everything to finish
         hb_thread.join()
         listen_thread.join()
+        manage_jobs_thread.join()
 
 
     def listen(self):
@@ -73,7 +71,7 @@ class Master:
 
         # Accept connections for messages until shutdown message
         
-        while not self.shutdown:
+        while not self.signals["shutdown"]:
             # Listen for a connection for 1s.
             try:
                 clientsocket, address = sock.accept()
@@ -105,7 +103,7 @@ class Master:
             
             # Handle message depending on type
             if msg["message_type"] == "shutdown":            
-                self.shutdown = True
+                self.signals["shutdown"] = True
                 logging.debug("Master: Shutting down")
                 for worker in self.workers.values():
                     if worker["status"] != "dead":
@@ -123,7 +121,7 @@ class Master:
                 # TODO: Check the job queue here
                 
             elif msg["message_type"] == "new_master_job":
-                self.start_job(msg)
+                self.init_job(msg)
 
     def send_shutdown(self, worker_port):
         message = {
@@ -154,7 +152,7 @@ class Master:
         # Socket accept() and recv() will block for a maximum of 1 second
         sock.settimeout(1)
 
-        while not self.shutdown:
+        while not self.signals["shutdown"]:
             # Check if any workers are dead
             for worker_info in self.workers.values():
                 if time.time() - worker_info["last_hb_received"] > 10:
@@ -192,7 +190,7 @@ class Master:
             if msg["message_type"] == "heartbeat" and msg["worker_pid"] in self.workers:
                 self.workers[msg["worker_pid"]]["last_hb_received"] = time.time()
 
-    def start_job(self, msg):
+    def init_job(self, msg):
         if not mapreduce.utils.check_schema({
             "input_directory": str,
             "output_directory": str,
@@ -219,15 +217,25 @@ class Master:
             num_mappers,
             num_reducers,
             self.workers,
+            self.signals,
         )
 
-        ready_workers = [worker for worker in self.workers.values() if worker["status"] == "ready"]
+        self.job_queue.put(new_job)
+        #ready_workers = [worker for worker in self.workers.values() if worker["status"] == "ready"]
 
-        if len(ready_workers) == 0 or self.current_job is not None:
-            self.job_queue.put(new_job)
-        else:
-            self.current_job = new_job
-            new_job.start()
+        #if len(ready_workers) == 0 or self.current_job is not None:
+        #else:
+            #self.current_job = new_job
+            #new_job.start()
+
+    def manage_jobs(self):
+        while not self.signals["shutdown"]:
+            try:
+                current_job = self.job_queue.get(timeout=1)
+            except Empty:
+                continue
+
+            current_job.start()
 
 
 @click.command()
