@@ -115,13 +115,19 @@ class Master:
                     "host" : msg["worker_host"],
                     "port": msg["worker_port"],
                     "status": "ready",
-                    "last_hb_received": time.time(), 
+                    "last_hb_received": time.time(),
+                    "job_output": None, 
                 }
                 self.send_register_ack(msg["worker_pid"])
-                # TODO: Check the job queue here
                 
             elif msg["message_type"] == "new_master_job":
                 self.init_job(msg)
+
+            elif msg["message_type"] == "status":
+                worker_pid = msg["worker_pid"]
+                self.workers[worker_pid]["status"] = "ready"
+                # TODO: Handle finished messages for Grouping stage
+                self.workers[worker_pid]["job_output"] = msg["output_files"]
 
     def send_shutdown(self, worker_port):
         message = {
@@ -221,12 +227,6 @@ class Master:
         )
 
         self.job_queue.put(new_job)
-        #ready_workers = [worker for worker in self.workers.values() if worker["status"] == "ready"]
-
-        #if len(ready_workers) == 0 or self.current_job is not None:
-        #else:
-            #self.current_job = new_job
-            #new_job.start()
 
     def manage_jobs(self):
         while not self.signals["shutdown"]:
