@@ -50,19 +50,18 @@ class Job:
         logging.info(f"Master: Starting job {self._id}")
 
         self._status = "started"
-        self.mapping()
-        # TODO: Maybe more stuff here
+
+        succeeded, output_files = self.mapping()
+        if not succeeded:
+            return
+
+        self.grouping()
+        self.reducing()
+        self.cleanup()
 
     def mapping(self):
         logging.info(f"Master: Starting mapping stage for job {self._id}")
         partition = self.partition_input()
-
-        """
-        TODO:
-         - Assign as many tasks as we can to available workers
-         - If not enough workers are available, "wait" (how?)
-         - If there are too many workers, don't assign all of them (we don't need them all)
-        """
 
         # Each job is a tuple containing the list of input files, the PID of the worker
         # assigned to the job, and whether the job is finished.
@@ -73,7 +72,7 @@ class Job:
         while len([job for job, pid, completed in job_list if not completed]) != 0:
             if self._signals["shutdown"]:
                 logging.info("Shutting down in mapping stage.")
-                return False
+                return False, job_outputs
             for i, (job, worker_pid, completed) in enumerate(job_list):
                 if completed:
                     continue
@@ -81,7 +80,7 @@ class Job:
                     # The worker has completed this job.
                     job_list[i] = (job, worker_pid, True)
                     assert(self._workers[worker_pid]["job_output"] is not None)
-                    job_outputs.append(self._workers[worker_pid]["job_output"])
+                    job_outputs += self._workers[worker_pid]["job_output"]
                     logging.info(f"Mapping job {i} complete")
                 elif worker_pid is None:
                     for worker in self._workers.values():
@@ -102,11 +101,54 @@ class Job:
             time.sleep(0.1)
         
         logging.info("Mapping stage complete.")
+        return True, job_outputs
 
 
-    def grouping(self):
-        # TODO
+    def grouping(self, output_files):
         logging.info(f"Master: Starting grouping stage for job {self._id}")
+
+        partition = self.partition_input()
+
+        # TODO: Refactor this mapping code to do grouping
+
+        # Each job is a tuple containing the list of input files, the PID of the worker
+        # assigned to the job, and whether the job is finished.
+        job_list = [(job, None, False) for job in partition]
+        job_outputs = []
+
+        logging.info("Assigning workers for grouping")
+        while len([job for job, pid, completed in job_list if not completed]) != 0:
+            if self._signals["shutdown"]:
+                logging.info("Shutting down in grouping stage.")
+                return False, job_outputs
+            for i, (job, worker_pid, completed) in enumerate(job_list):
+                if completed:
+                    continue
+                elif worker_pid is not None and self._workers[worker_pid]["status"] == "ready":
+                    # The worker has completed this job.
+                    job_list[i] = (job, worker_pid, True)
+                    assert(self._workers[worker_pid]["job_output"] is not None)
+                    job_outputs += self._workers[worker_pid]["job_output"]
+                    logging.info(f"grouping job {i} complete")
+                elif worker_pid is None:
+                    for worker in self._workers.values():
+                        if worker["status"] == "ready":
+                            worker["status"] = "busy"
+                            job_list[i] = (job, worker["pid"], False)
+                            mapreduce.utils.send_message({
+                                "message_type": "new_sort_job",
+                                "input_files": [str(file) for file in job],
+                                "output_file": str(self._grouper_output_dir/"sorted{01, 02, ...}")
+                                "worker_pid": worker_pid,
+                            }, worker["host"], worker["port"])
+                            break
+                elif self._workers[worker_pid]["status"] == "dead":
+                    job_list[i] = (job, None, False)
+
+            time.sleep(0.1)
+        
+        logging.info("Grouping stage complete.")
+        return True, job_outputs
 
     def reducing(self):
         # TODO
