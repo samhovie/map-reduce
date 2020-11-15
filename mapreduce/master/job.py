@@ -1,3 +1,5 @@
+import heapq
+import itertools
 import logging
 import mapreduce.utils
 from pathlib import Path
@@ -53,19 +55,32 @@ class Job:
 
         succeeded, output_files = self.mapping()
         if not succeeded:
+            logging.debug("Exiting early after mapping")
             return
 
-        self.grouping()
-        self.reducing()
+        if not self.grouping(output_files):
+            logging.debug("Exiting early after grouping")
+            return
+
+        succeeded, reducing_output_files = self.reducing()
+        if not succeeded:
+            logging.debug("Exiting early after reducing")
+            return
+
         self.cleanup()
 
     def mapping(self):
         logging.info(f"Master: Starting mapping stage for job {self._id}")
-        partition = self.partition_input()
+
+        get_file_name = lambda path: path.name
+        files = list(self._input_dir.glob("*"))
+        files.sort(key=get_file_name)
+        partition = self.partition_input(files, self._num_mappers)
+
 
         # Each job is a tuple containing the list of input files, the PID of the worker
         # assigned to the job, and whether the job is finished.
-        job_list = [(job, None, False) for job in partition]
+        job_list = [(job, None, False) for job in partition if len(job) != 0]
         job_outputs = []
 
         logging.info("Assigning workers for mapping")
@@ -92,7 +107,7 @@ class Job:
                                 "input_files": [str(file) for file in job],
                                 "executable": self._mapper_exec,
                                 "output_directory": str(self._mapper_output_dir),
-                                "worker_pid": worker_pid,
+                                "worker_pid": worker["pid"],
                             }, worker["host"], worker["port"])
                             break
                 elif self._workers[worker_pid]["status"] == "dead":
@@ -107,20 +122,20 @@ class Job:
     def grouping(self, output_files):
         logging.info(f"Master: Starting grouping stage for job {self._id}")
 
-        partition = self.partition_input()
-
-        # TODO: Refactor this mapping code to do grouping
+        output_files.sort()
+        ready_workers = [worker for worker in self._workers.values() if worker["status"] == "ready"]
+        partition = self.partition_input(output_files, len(ready_workers))
 
         # Each job is a tuple containing the list of input files, the PID of the worker
         # assigned to the job, and whether the job is finished.
-        job_list = [(job, None, False) for job in partition]
+        job_list = [(job, None, False) for job in partition if len(job) != 0]
         job_outputs = []
 
         logging.info("Assigning workers for grouping")
         while len([job for job, pid, completed in job_list if not completed]) != 0:
             if self._signals["shutdown"]:
                 logging.info("Shutting down in grouping stage.")
-                return False, job_outputs
+                return False
             for i, (job, worker_pid, completed) in enumerate(job_list):
                 if completed:
                     continue
@@ -138,8 +153,8 @@ class Job:
                             mapreduce.utils.send_message({
                                 "message_type": "new_sort_job",
                                 "input_files": [str(file) for file in job],
-                                "output_file": str(self._grouper_output_dir/"sorted{01, 02, ...}")
-                                "worker_pid": worker_pid,
+                                "output_file": str(self._grouper_output_dir/f"sorted{(i + 1):02}"),
+                                "worker_pid": worker["pid"],
                             }, worker["host"], worker["port"])
                             break
                 elif self._workers[worker_pid]["status"] == "dead":
@@ -147,28 +162,93 @@ class Job:
 
             time.sleep(0.1)
         
+        files = [Path(file).open("r") for file in job_outputs]
+        sorted_lines = heapq.merge(*files)
+        
+        # Open reducer files
+        reducer_files = []
+        for i in range(self._num_reducers):
+            reducer_files.append(Path(self._grouper_output_dir/f"reduce{(i + 1):02}").open("w"))
+        
+        get_key = lambda line: line.split("\t")[0]
+        i = 0
+        for key, group in itertools.groupby(sorted_lines, key=get_key):
+            for line in group:
+                reducer_files[i].writelines([line])
+            i = (i + 1) % (self._num_reducers)
+
+        for file in reducer_files:
+            file.close()
+
+        for file in files:
+            file.close()
+
         logging.info("Grouping stage complete.")
-        return True, job_outputs
+        return True
 
     def reducing(self):
-        # TODO
         logging.info(f"Master: Starting reducing stage for job {self._id}")
+        
+        get_file_name = lambda path: path.name
+
+        files = list(self._grouper_output_dir.glob("reduce*"))
+        files.sort(key=get_file_name)
+        partition = self.partition_input(files, self._num_reducers)
+
+        job_list = [(job, None, False) for job in partition if len(job) != 0]
+        job_outputs = []
+
+        logging.info("Assigning workers for reducing")
+        while len([job for job, pid, completed in job_list if not completed]) != 0:
+            if self._signals["shutdown"]:
+                logging.info("Shutting down in reducing stage.")
+                return False, job_outputs
+            for i, (job, worker_pid, completed) in enumerate(job_list):
+                if completed:
+                    continue
+                elif worker_pid is not None and self._workers[worker_pid]["status"] == "ready":
+                    # The worker has completed this job.
+                    job_list[i] = (job, worker_pid, True)
+                    assert(self._workers[worker_pid]["job_output"] is not None)
+                    job_outputs += self._workers[worker_pid]["job_output"]
+                    logging.info(f"Reducing job {i} complete")
+                elif worker_pid is None:
+                    for worker in self._workers.values():
+                        if worker["status"] == "ready":
+                            worker["status"] = "busy"
+                            job_list[i] = (job, worker["pid"], False)
+                            mapreduce.utils.send_message({
+                                "message_type": "new_worker_job",
+                                "input_files": [str(file) for file in job],
+                                "executable": self._reducer_exec,
+                                "output_directory": str(self._reducer_output_dir),
+                                "worker_pid": worker["pid"],
+                            }, worker["host"], worker["port"])
+                            break
+                elif self._workers[worker_pid]["status"] == "dead":
+                    job_list[i] = (job, None, False)
+
+            time.sleep(0.1)
+
+        logging.info("Reducing stage complete.")
+        return True, job_outputs
     
     def cleanup(self):
         # TODO
         logging.info(f"Master: Finishing job {self._id}")
         self.status = "finished"
 
-    def partition_input(self):
-        assert(self._num_mappers != 0)
+    def partition_input(self, items, num_partitions):
+        # Note: Empty partitions may be returned if num_partitions > len(items).
+        # In this case, it may be desirable to ignore the empty partitions.
+        assert(num_partitions != 0)
 
-        files = self._input_dir.glob("*")
-        partition = [[]*1 for i in range(self._num_mappers)]
+        partition = [[]*1 for i in range(num_partitions)]
 
         i = 0
-        for file in files:
-            partition[i].append(file)
-            i = (i + 1) % self._num_mappers
+        for item in items:
+            partition[i].append(item)
+            i = (i + 1) % num_partitions
         
         return partition
 

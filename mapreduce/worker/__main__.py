@@ -108,6 +108,11 @@ class Worker:
                     [Path(file) for file in msg["input_files"]],
                     Path(msg["output_directory"])
                 )
+            elif msg["message_type"] == "new_sort_job":
+                self.sort_files(
+                    [Path(file) for file in msg["input_files"]],
+                    Path(msg["output_file"])
+                ),
 
     def heartbeats_timer(self):
         while not self.shutdown:
@@ -142,6 +147,23 @@ class Worker:
             "status": "finished",
             "worker_pid": os.getpid(),
         }, "localhost", self.master_port)
+    
+    def sort_files(self, input_files, output_file):
+        lines = []
+        for file in input_files:
+            with file.open("r") as open_file:
+                lines.append(open_file.readline())
+        lines.sort()
+        with output_file.open("w") as open_output_file:
+            open_output_file.writelines(lines)
+
+        mapreduce.utils.send_message({
+            "message_type": "status",
+            "output_file" : str(output_file),
+            "status": "finished",
+            "worker_pid": os.getpid(),
+        }, "localhost", self.master_port)
+
         
 
 @click.command()

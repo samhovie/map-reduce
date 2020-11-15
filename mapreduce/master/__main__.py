@@ -127,12 +127,15 @@ class Master:
                 self.init_job(msg)
 
             elif msg["message_type"] == "status":
+                assert(msg["status"] == "finished")
                 worker_pid = msg["worker_pid"]
                 logging.info(f"Master: Status update for worker {worker_pid}")
                 logging.debug(msg)
                 self.workers[worker_pid]["status"] = "ready"
-                # TODO: Handle finished messages for Grouping stage
-                self.workers[worker_pid]["job_output"] = msg["output_files"]
+                if "output_files" in msg:
+                    self.workers[worker_pid]["job_output"] = msg["output_files"]
+                elif "output_file" in msg:
+                    self.workers[worker_pid]["job_output"] = [msg["output_file"]]
 
         sock.close()
 
@@ -177,8 +180,6 @@ class Master:
                 message_bytes = sock.recv(4096)
             except socket.timeout:
                 continue
-            if not data:
-                continue
 
             # Parse message chunks into JSON data
             message_str = message_bytes.decode("utf-8")
@@ -186,8 +187,6 @@ class Master:
                 msg = json.loads(message_str)
             except json.JSONDecodeError:
                 continue
-
-            logging.info("Heartbeat from %s", address[0])
 
             # Handle message depending on type
             if msg["message_type"] == "heartbeat" and msg["worker_pid"] in self.workers:
