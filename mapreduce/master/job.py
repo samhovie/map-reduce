@@ -3,6 +3,7 @@ import itertools
 import logging
 import mapreduce.utils
 from pathlib import Path
+import shutil
 import time
 
 
@@ -67,7 +68,7 @@ class Job:
             logging.debug("Exiting early after reducing")
             return
 
-        self.cleanup()
+        self.cleanup(reducing_output_files)
 
     def mapping(self):
         logging.info(f"Master: Starting mapping stage for job {self._id}")
@@ -97,6 +98,7 @@ class Job:
                     assert(self._workers[worker_pid]["job_output"] is not None)
                     job_outputs += self._workers[worker_pid]["job_output"]
                     logging.info(f"Mapping job {i} complete")
+                    logging.info("%s outputs from job", len(self._workers[worker_pid]["job_output"]))
                 elif worker_pid is None:
                     for worker in self._workers.values():
                         if worker["status"] == "ready":
@@ -116,6 +118,7 @@ class Job:
             time.sleep(0.1)
         
         logging.info("Mapping stage complete.")
+        logging.info("%s outputs from mapping", len(job_outputs))
         return True, job_outputs
 
 
@@ -129,6 +132,7 @@ class Job:
         # Each job is a tuple containing the list of input files, the PID of the worker
         # assigned to the job, and whether the job is finished.
         job_list = [(job, None, False) for job in partition if len(job) != 0]
+        logging.info(f"Grouping jobs: {job_list}")
         job_outputs = []
 
         logging.info("Assigning workers for grouping")
@@ -170,9 +174,11 @@ class Job:
         for i in range(self._num_reducers):
             reducer_files.append(Path(self._grouper_output_dir/f"reduce{(i + 1):02}").open("w"))
         
+
         get_key = lambda line: line.split("\t")[0]
         i = 0
-        for key, group in itertools.groupby(sorted_lines, key=get_key):
+        grouped_lines = itertools.groupby(sorted_lines, key=get_key)
+        for key, group in grouped_lines:
             for line in group:
                 reducer_files[i].writelines([line])
             i = (i + 1) % (self._num_reducers)
@@ -233,9 +239,16 @@ class Job:
         logging.info("Reducing stage complete.")
         return True, job_outputs
     
-    def cleanup(self):
-        # TODO
+    def cleanup(self, output_files):
         logging.info(f"Master: Finishing job {self._id}")
+        self._output_dir.mkdir(exist_ok=True)
+
+        for file in output_files:
+            copy_src = Path(file)
+            copy_dst = self._output_dir/(copy_src.name).replace("reduce", "outputfile")
+            shutil.copy(copy_src, copy_dst)
+
+
         self.status = "finished"
 
     def partition_input(self, items, num_partitions):

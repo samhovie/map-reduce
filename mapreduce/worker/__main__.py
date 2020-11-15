@@ -149,10 +149,12 @@ class Worker:
         }, "localhost", self.master_port)
     
     def sort_files(self, input_files, output_file):
+        logging.debug(f"Worker: Sorting files {input_files} into {output_file}")
         lines = []
         for file in input_files:
             with file.open("r") as open_file:
-                lines.append(open_file.readline())
+                for line in open_file:
+                    lines.append(line)
         lines.sort()
         with output_file.open("w") as open_output_file:
             open_output_file.writelines(lines)
