@@ -24,12 +24,13 @@ class Worker:
         self.master_port = master_port
         self.shutdown = False 
 
+        # Initiate hb before registering
+        self.heartbeat = threading.Thread(target=self.heartbeats_timer)
+
         # Listen for messages on worker's port
         listen_thread = threading.Thread(target=self.listen)
         listen_thread.start()
 
-        # Initiate hb before registering
-        self.heartbeat = threading.Thread(target=self.heartbeats_timer)
 
         # Connect to the server
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -41,7 +42,7 @@ class Worker:
             "worker_host" : "localhost",
             "worker_port" : self.port,
             "worker_pid" : os.getpid(),
-        })
+        }, indent=None)
         sock.sendall(message.encode('utf-8'))
         sock.close()
 
@@ -128,7 +129,7 @@ class Worker:
         message = json.dumps({
             "message_type" : "heartbeat",
             "worker_pid" : os.getpid(),
-        })
+        }, indent = None)
         sock.sendall(message.encode('utf-8'))
         sock.close()
 

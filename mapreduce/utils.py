@@ -13,7 +13,7 @@ def send_message(msg, host, port):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((host, port))
 
-    message = json.dumps(msg)
+    message = json.dumps(msg, indent=None)
     sock.sendall(message.encode('utf-8'))
     sock.close()
 
