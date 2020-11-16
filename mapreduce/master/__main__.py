@@ -11,7 +11,7 @@ import shutil
 import threading
 
 import click
-from job import Job
+from mapreduce.master.job import Job
 import mapreduce.utils
 
 
@@ -76,7 +76,7 @@ class Master:
         while not self.signals["shutdown"]:
             # Listen for a connection for 1s.
             try:
-                clientsocket = sock.accept()
+                clientsocket, _ = sock.accept()
             except socket.timeout:
                 continue
 
@@ -207,8 +207,8 @@ class Master:
             return
 
         job_params = {
-            "input_dir": msg["input_directory"],
-            "output_dir": msg["output_directory"],
+            "input_dir": Path(msg["input_directory"]),
+            "output_dir": Path(msg["output_directory"]),
             "mapper_exec": msg["mapper_executable"],
             "reducer_exec": msg["reducer_executable"],
             "num_mappers": msg["num_mappers"],

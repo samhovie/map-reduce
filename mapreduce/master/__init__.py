@@ -6,4 +6,4 @@ Nilay Muchhala <nilaym@umich.edu>
 """
 
 from mapreduce.master.__main__ import Master
-from mapreduce.master.job import job
+from mapreduce.master.job import Job

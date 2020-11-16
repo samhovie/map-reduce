@@ -81,7 +81,7 @@ class Job:
         files.sort(key=lambda path: path.name)
         partition = mapreduce.utils.partition_input(
             files,
-            self._job_params["_num_mappers"]
+            self._job_params["num_mappers"]
         )
 
         # Each job is a tuple containing the list of input files, the PID of
@@ -97,7 +97,7 @@ class Job:
                 "input_files": [str(file) for file in job],
                 "executable": self._job_params["mapper_exec"],
                 "output_directory": str(
-                    self._tmp_output_dirs["mapping"]
+                    self._tmp_output_dirs["mapper"]
                 ),
                 "worker_pid": worker["pid"],
             }, worker["host"], worker["port"])
@@ -267,9 +267,10 @@ class Job:
                         if worker["status"] == "ready":
                             worker["status"] = "busy"
                             job_list[i] = (job, worker["pid"], False)
+                            logging.debug("on_available for job %s", job)
                             on_available(worker, job, i)
                             break
                 elif self._workers[worker_pid]["status"] == "dead":
                     job_list[i] = (job, None, False)
             time.sleep(0.1)
-        return True, job_list
+        return True, job_outputs

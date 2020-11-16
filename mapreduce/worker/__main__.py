@@ -35,20 +35,6 @@ class Worker:
         listen_thread = threading.Thread(target=self.listen)
         listen_thread.start()
 
-        # Connect to the server
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(("localhost", self.master_port))
-
-        # Send register message to master
-        message = json.dumps({
-            "message_type": "register",
-            "worker_host": "localhost",
-            "worker_port": self.port,
-            "worker_pid": os.getpid(),
-        }, indent=None)
-        sock.sendall(message.encode('utf-8'))
-        sock.close()
-
         listen_thread.join()
         if self.heartbeat.is_alive():
             self.heartbeat.join()
@@ -57,6 +43,15 @@ class Worker:
         """Wait on a message from a socket OR a shutdown signal."""
         # Create socket
         sock = mapreduce.utils.create_tcp_socket("localhost", self.port)
+
+        # Send register message to master
+        msg = {
+            "message_type": "register",
+            "worker_host": "localhost",
+            "worker_port": self.port,
+            "worker_pid": os.getpid(),
+        }
+        mapreduce.utils.send_message(msg, "localhost", self.master_port)
 
         # Accept connections for messages until shutdown message
         while not self.shutdown:
